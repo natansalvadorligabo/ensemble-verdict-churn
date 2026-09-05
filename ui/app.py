@@ -1,5 +1,6 @@
 import json
 import os
+import re
 from typing import Any
 
 import chainlit as cl
@@ -18,67 +19,93 @@ async def request_schema() -> dict[str, object]:
 
 @cl.on_chat_start
 async def start() -> None:
-    try:
-        schema = await request_schema()
-        cl.user_session.set("schema", schema)
-        await cl.Message(
-            content="I can guide you through a churn prediction. Send any message when you are ready."
-        ).send()
-    except httpx.HTTPError as error:
-        await cl.Message(content=f"The prediction assistant is unavailable: {error}").send()
+    await open_prediction_flow()
 
 
 @cl.on_message
 async def predict(message: cl.Message) -> None:
-    schema = cl.user_session.get("schema")
-    if schema is None:
-        try:
-            schema = await request_schema()
-            cl.user_session.set("schema", schema)
-        except httpx.HTTPError as error:
-            await cl.Message(content=f"The prediction assistant is unavailable: {error}").send()
-            return
-    instance = await collect_instance(schema)
-    if instance is not None:
-        await stream_prediction(instance)
+    if not cl.user_session.get("form_active"):
+        await open_prediction_flow()
 
 
-async def collect_instance(schema: dict[str, object]) -> dict[str, object] | None:
+async def open_prediction_flow() -> None:
+    try:
+        schema = cl.user_session.get("schema") or await request_schema()
+        cl.user_session.set("schema", schema)
+    except httpx.HTTPError as error:
+        await cl.Message(content=f"The prediction assistant is unavailable: {error}").send()
+        return
+    cl.user_session.set("form_active", True)
+    try:
+        while True:
+            instance = await request_customer_profile(schema)
+            if instance is None:
+                await cl.Message(
+                    content="The prediction was cancelled. Send any message to open the form again."
+                ).send()
+                return
+            await stream_prediction(instance)
+    finally:
+        cl.user_session.set("form_active", False)
+
+
+async def request_customer_profile(
+    schema: dict[str, object],
+) -> dict[str, object] | None:
     fields = schema.get("fields", [])
-    if not isinstance(fields, list):
+    if not isinstance(fields, list) or not all(isinstance(field, dict) for field in fields):
         await cl.Message(content="The training schema is invalid.").send()
         return None
-    await cl.Message(content="I will ask for one customer attribute at a time.").send()
-    instance: dict[str, object] = {}
-    for field in fields:
-        if not isinstance(field, dict):
-            await cl.Message(content="The training schema is invalid.").send()
-            return None
-        value = await ask_for_value(field)
-        if value is None:
-            await cl.Message(content="The prediction was cancelled. Send any message to start again.").send()
-            return None
-        instance[str(field["name"])] = value
-    return instance
+    element = cl.CustomElement(
+        name="CustomerProfileForm",
+        display="inline",
+        props={"fields": [form_field(field) for field in fields]},
+    )
+    response = await cl.AskElementMessage(
+        content="Complete the customer profile to estimate churn risk.",
+        element=element,
+        timeout=3600,
+    ).send()
+    if response is None or not response.get("submitted"):
+        return None
+    try:
+        return {
+            str(field["name"]): parse_answer(str(response[str(field["name"])]), field)
+            for field in fields
+        }
+    except (KeyError, ValueError) as error:
+        await cl.Message(content=f"The submitted profile is invalid: {error}").send()
+        return None
 
 
-async def ask_for_value(field: dict[str, object]) -> object | None:
-    while True:
-        response = await cl.AskUserMessage(content=field_prompt(field), timeout=600).send()
-        if response is None:
-            return None
-        try:
-            return parse_answer(str(response["output"]), field)
-        except ValueError as error:
-            await cl.Message(content=str(error)).send()
-
-
-def field_prompt(field: dict[str, object]) -> str:
+def form_field(field: dict[str, object]) -> dict[str, object]:
     name = str(field["name"])
+    result: dict[str, object] = {
+        "id": name,
+        "label": humanize(name),
+        "type": field["type"],
+        "required": True,
+    }
     if field["type"] == "number":
-        return f"{name}: enter a number from {field['minimum']} to {field['maximum']}."
-    options = ", ".join(str(option) for option in field["options"])
-    return f"{name}: choose one of: {options}."
+        result.update(
+            {
+                "minimum": field["minimum"],
+                "maximum": field["maximum"],
+                "step": number_step(field),
+            }
+        )
+    else:
+        result["options"] = field["options"]
+    return result
+
+
+def humanize(name: str) -> str:
+    return re.sub(r"(?<!^)(?=[A-Z])", " ", name).replace("last Year", "Last Year")
+
+
+def number_step(field: dict[str, object]) -> str:
+    values = (field["minimum"], field["maximum"])
+    return "1" if all(float(value).is_integer() for value in values) else "0.01"
 
 
 def parse_answer(answer: str, field: dict[str, object]) -> object:
@@ -87,20 +114,19 @@ def parse_answer(answer: str, field: dict[str, object]) -> object:
         try:
             value = float(answer.replace(",", "."))
         except ValueError as error:
-            raise ValueError(f"{name} must be a number.") from error
+            raise ValueError(f"{name} must be a number") from error
         if float(field["minimum"]) <= value <= float(field["maximum"]):
             return value
-        raise ValueError(f"{name} must be within the trained range.")
+        raise ValueError(f"{name} must be within the trained range")
     options = {str(option).casefold(): str(option) for option in field["options"]}
     selected = options.get(answer.strip().casefold())
     if selected is None:
-        raise ValueError(f"{name} must be one of the listed options.")
+        raise ValueError(f"{name} must be one of the listed options")
     return selected
 
 
 async def stream_prediction(instance: dict[str, object]) -> None:
     votes: list[dict[str, object]] = []
-    completed = False
     async with httpx.AsyncClient(timeout=90) as client:
         async with client.stream(
             "POST", f"{API_URL}/predictions/stream", json=instance
@@ -115,12 +141,9 @@ async def stream_prediction(instance: dict[str, object]) -> None:
                 async with cl.Step(name=event["type"], type="tool") as step:
                     step.output = format_event(event)
                 if event["type"] == "decision":
-                    completed = True
                     await cl.Message(content=render_result(votes, event["content"])).send()
                 if event["type"] == "arbitration_error":
                     await cl.Message(content=render_failure(event["content"])).send()
-    if completed:
-        await cl.Message(content="Send any message when you want to predict churn for another customer.").send()
 
 
 def format_event(event: dict[str, Any]) -> str:
