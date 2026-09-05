@@ -16,7 +16,7 @@ docker compose up --build
 
 The training stack uses Python 3.13 and PyCaret 4.0.0a8, the newest PyCaret release compatible with the modern scientific Python stack. Python 3.14 is not supported yet by its joblib and cloudpickle persistence dependencies.
 
-Open `http://localhost:8001` and describe a customer naturally in any language. Qwen extracts the typed prediction arguments, the assistant requests only missing attributes, and a confirmation is required before the five classifiers run. Type `/form` to use the schema-driven manual form instead.
+Open `http://localhost:8001` and describe a customer naturally in any language. Qwen extracts the typed prediction arguments, the assistant requests only missing attributes, and a confirmation is required before the five classifiers run. Follow-up questions retain the last profile, votes, and decision as context. Type `/new` to explicitly start another customer or `/form` to use the schema-driven manual form.
 
 Pull Qwen once after Compose starts:
 
@@ -47,3 +47,7 @@ The local dataset is derived from Kaggle dataset `ankitverma2010/ecommerce-custo
 ```powershell
 python -m pytest
 ```
+
+## Licenses
+
+The original source code is available under the [MIT License](LICENSE). The included dataset remains under CC BY-NC-SA 4.0 and is excluded from the MIT grant. See the [dataset attribution](data/DATASET_LICENSE.md) for details.

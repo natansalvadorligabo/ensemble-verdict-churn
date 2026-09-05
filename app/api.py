@@ -11,10 +11,14 @@ from fastapi.responses import StreamingResponse
 
 from app.domain import ModelVote, aggregate_votes
 from app.services import (
+    AnalysisExplainer,
     Arbiter,
     ArtifactEnsemble,
+    ConversationInterpreter,
     Ensemble,
     OllamaArbiter,
+    OllamaAnalysisExplainer,
+    OllamaConversationInterpreter,
     OllamaProfileExtractor,
     ProfileExtractor,
     load_form_schema,
@@ -26,11 +30,15 @@ def create_app(
     ensemble: Ensemble | None = None,
     arbiter: Arbiter | None = None,
     extractor: ProfileExtractor | None = None,
+    explainer: AnalysisExplainer | None = None,
+    interpreter: ConversationInterpreter | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Ensemble Verdict Churn API")
     app.state.ensemble = ensemble
     app.state.arbiter = arbiter or OllamaArbiter()
     app.state.extractor = extractor or OllamaProfileExtractor()
+    app.state.explainer = explainer or OllamaAnalysisExplainer()
+    app.state.interpreter = interpreter or OllamaConversationInterpreter()
 
     @app.get("/health")
     async def health() -> dict[str, str]:
@@ -62,6 +70,51 @@ def create_app(
             raise HTTPException(422, str(error)) from error
         except httpx.HTTPError as error:
             raise HTTPException(503, f"Profile extraction is unavailable: {error}") from error
+
+    @app.post("/predictions/explain")
+    async def explain_prediction(payload: dict[str, object]) -> dict[str, str]:
+        question = str(payload.get("question", "")).strip()
+        analysis = payload.get("analysis")
+        if not question:
+            raise HTTPException(422, "A follow-up question is required")
+        if not isinstance(analysis, dict):
+            raise HTTPException(422, "A previous prediction analysis is required")
+        try:
+            answer = await app.state.explainer.explain(question, analysis)
+            return {"answer": answer}
+        except ValueError as error:
+            raise HTTPException(422, str(error)) from error
+        except httpx.HTTPError as error:
+            raise HTTPException(503, f"Prediction explanation is unavailable: {error}") from error
+
+    @app.post("/predictions/explain/stream")
+    async def stream_prediction_explanation(payload: dict[str, object]) -> StreamingResponse:
+        question = str(payload.get("question", "")).strip()
+        analysis = payload.get("analysis")
+        if not question:
+            raise HTTPException(422, "A follow-up question is required")
+        if not isinstance(analysis, dict):
+            raise HTTPException(422, "A previous prediction analysis is required")
+        return StreamingResponse(
+            app.state.explainer.stream(question, analysis),
+            media_type="text/plain; charset=utf-8",
+        )
+
+    @app.post("/conversation/interpret")
+    async def interpret_conversation(payload: dict[str, object]) -> dict[str, str]:
+        message = str(payload.get("message", "")).strip()
+        context = payload.get("context", {})
+        if not message:
+            raise HTTPException(422, "A message is required")
+        if not isinstance(context, dict):
+            raise HTTPException(422, "The conversation context is invalid")
+        try:
+            intent = await app.state.interpreter.interpret(message, context)
+            return {"intent": intent}
+        except ValueError as error:
+            raise HTTPException(422, str(error)) from error
+        except httpx.HTTPError as error:
+            raise HTTPException(503, f"Conversation interpretation is unavailable: {error}") from error
 
     @app.post("/predictions/stream")
     async def prediction_stream(instance: dict[str, object]) -> StreamingResponse:

@@ -50,6 +50,11 @@ class StubExtractor:
         }
 
 
+class StubExplainer:
+    async def explain(self, question: str, analysis: dict[str, object]) -> str:
+        return f"Because the stored decision was {analysis['decision']}."
+
+
 async def stream_events(client: httpx.AsyncClient) -> list[dict[str, object]]:
     response = await client.post(
         "/predictions/stream", json={"Tenure": 4, "PreferredLoginDevice": "Mobile Phone"}
@@ -171,3 +176,23 @@ async def test_profile_extraction_accepts_natural_language_and_current_values(
         "profile": {"Tenure": 4.0},
         "missing_fields": ["PreferredLoginDevice"],
     }
+
+
+@pytest.mark.asyncio
+async def test_follow_up_question_is_answered_from_the_previous_analysis() -> None:
+    app = create_app(
+        StubEnsemble(["No"] * 5),
+        StubArbiter(RuntimeError()),
+        StubExtractor(),
+        StubExplainer(),
+    )
+    transport = httpx.ASGITransport(app=app)
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/predictions/explain",
+            json={"question": "Why?", "analysis": {"decision": "churn"}},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {"answer": "Because the stored decision was churn."}

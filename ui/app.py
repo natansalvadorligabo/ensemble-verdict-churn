@@ -6,10 +6,7 @@ from typing import Any
 import chainlit as cl
 import httpx
 
-
 API_URL = os.getenv("API_URL", "http://api:8000")
-CONFIRMATIONS = {"confirm", "confirmed", "confirmar", "confirmo", "sim", "yes"}
-CANCELLATIONS = {"cancel", "cancelar", "cancela", "no", "não", "nao"}
 
 
 async def request_schema() -> dict[str, object]:
@@ -29,6 +26,16 @@ async def extract_profile(
         )
         response.raise_for_status()
         return response.json()
+
+
+async def interpret_message(message: str, context: dict[str, object]) -> str:
+    async with httpx.AsyncClient(timeout=90) as client:
+        response = await client.post(
+            f"{API_URL}/conversation/interpret",
+            json={"message": message, "context": context},
+        )
+        response.raise_for_status()
+        return str(response.json()["intent"])
 
 
 @cl.on_chat_start
@@ -53,24 +60,55 @@ async def handle_message(message: cl.Message) -> None:
     if schema is None:
         return
     if content.casefold() == "/form":
+        cl.user_session.set("last_analysis", None)
         await handle_form(schema)
         return
+    if content.casefold() == "/new":
+        reset_profile()
+        cl.user_session.set("last_analysis", None)
+        await cl.Message(content="Describe the new customer when ready.").send()
+        return
     pending_profile = cl.user_session.get("pending_profile")
+    draft_profile = cl.user_session.get("draft_profile")
+    last_analysis = cl.user_session.get("last_analysis")
+    try:
+        async with cl.Step(name="interpret_message", type="tool") as step:
+            intent = await interpret_message(
+                content,
+                {
+                    "profile_awaiting_confirmation": isinstance(pending_profile, dict),
+                    "profile_in_progress": isinstance(draft_profile, dict),
+                    "completed_prediction_available": isinstance(last_analysis, dict),
+                },
+            )
+            step.output = f"Intent: {intent}"
+    except httpx.HTTPError as error:
+        await cl.Message(content=f"I could not interpret the message: {error}").send()
+        return
     if isinstance(pending_profile, dict):
-        if content.casefold() in CONFIRMATIONS:
+        if intent == "confirm_profile":
             cl.user_session.set("pending_profile", None)
             await stream_prediction(pending_profile)
             await invite_another_prediction()
             return
-        if content.casefold() in CANCELLATIONS:
+        if intent == "cancel_profile":
             reset_profile()
             await cl.Message(content="Prediction cancelled. Describe another customer when ready.").send()
             return
         await process_description(content, pending_profile, schema)
         return
-    draft_profile = cl.user_session.get("draft_profile")
-    current_profile = draft_profile if isinstance(draft_profile, dict) else {}
-    await process_description(content, current_profile, schema)
+    if isinstance(draft_profile, dict):
+        if intent == "cancel_profile":
+            reset_profile()
+            await cl.Message(content="Prediction cancelled. Describe another customer when ready.").send()
+            return
+        await process_description(content, draft_profile, schema)
+        return
+    if isinstance(last_analysis, dict) and intent == "ask_about_result":
+        await answer_follow_up(content, last_analysis)
+        return
+    cl.user_session.set("last_analysis", None)
+    await process_description(content, {}, schema)
 
 
 async def ensure_schema() -> dict[str, object] | None:
@@ -110,6 +148,25 @@ async def process_description(
     cl.user_session.set("draft_profile", None)
     cl.user_session.set("pending_profile", profile)
     await cl.Message(content=render_profile_confirmation(profile, schema)).send()
+
+
+async def answer_follow_up(question: str, analysis: dict[str, object]) -> None:
+    try:
+        message = cl.Message(content="")
+        async with cl.Step(name="explain_prediction", type="tool") as step:
+            async with httpx.AsyncClient(timeout=90) as client:
+                async with client.stream(
+                    "POST",
+                    f"{API_URL}/predictions/explain/stream",
+                    json={"question": question, "analysis": analysis},
+                ) as response:
+                    response.raise_for_status()
+                    async for token in response.aiter_text():
+                        await message.stream_token(token)
+            step.output = "The previous prediction was reviewed."
+        await message.send()
+    except httpx.HTTPError as error:
+        await cl.Message(content=f"I could not explain the previous prediction: {error}").send()
 
 
 async def handle_form(schema: dict[str, object]) -> None:
@@ -153,7 +210,10 @@ def render_profile_confirmation(
 async def invite_another_prediction() -> None:
     reset_profile()
     await cl.Message(
-        content="Describe another customer, or type `/form` to use the manual form."
+        content=(
+            "Ask me anything about this result. To continue, describe another customer, "
+            "type `/new`, or type `/form` to use the manual form."
+        )
     ).send()
 
 
@@ -249,6 +309,14 @@ async def stream_prediction(instance: dict[str, object]) -> None:
                 async with cl.Step(name=event["type"], type="tool") as step:
                     step.output = format_event(event)
                 if event["type"] == "decision":
+                    cl.user_session.set(
+                        "last_analysis",
+                        {
+                            "profile": instance,
+                            "votes": votes,
+                            "decision": event["content"],
+                        },
+                    )
                     await cl.Message(content=render_result(votes, event["content"])).send()
                 if event["type"] == "arbitration_error":
                     await cl.Message(content=render_failure(event["content"])).send()

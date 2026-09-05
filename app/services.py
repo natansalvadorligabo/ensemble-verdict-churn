@@ -33,6 +33,16 @@ class ProfileExtractor(Protocol):
     ) -> dict[str, object]: ...
 
 
+class AnalysisExplainer(Protocol):
+    async def explain(self, question: str, analysis: dict[str, object]) -> str: ...
+
+    def stream(self, question: str, analysis: dict[str, object]) -> AsyncIterator[str]: ...
+
+
+class ConversationInterpreter(Protocol):
+    async def interpret(self, message: str, context: dict[str, object]) -> str: ...
+
+
 class ArtifactEnsemble:
     def __init__(self, artifact_directory: Path) -> None:
         self.artifact_directory = artifact_directory
@@ -136,6 +146,150 @@ class OllamaProfileExtractor:
             }
         }
         return normalize_profile_extraction(complete_payload, form_schema)
+
+
+class OllamaAnalysisExplainer:
+    def __init__(self, base_url: str | None = None, model: str | None = None) -> None:
+        self.base_url = (base_url or os.getenv("OLLAMA_URL", "http://ollama:11434")).rstrip("/")
+        self.model = model or os.getenv("OLLAMA_MODEL", "qwen3:1.7b")
+
+    async def explain(self, question: str, analysis: dict[str, object]) -> str:
+        output_schema = {
+            "type": "object",
+            "properties": {"answer": {"type": "string", "minLength": 1}},
+            "required": ["answer"],
+            "additionalProperties": False,
+        }
+        prompt = {
+            "instruction": (
+                "Answer the follow-up question in the user's language using only the recorded "
+                "customer profile, model votes, confidences, and final decision. Label 1 means "
+                "predicted churn and label 0 means predicted retention. Explain associations, "
+                "not causal claims, and acknowledge disagreement when present."
+            ),
+            "analysis": analysis,
+            "question": question,
+            "response_schema": output_schema,
+        }
+        async with httpx.AsyncClient(timeout=60) as client:
+            response = await client.post(
+                f"{self.base_url}/api/chat",
+                json={
+                    "model": self.model,
+                    "stream": False,
+                    "think": False,
+                    "format": output_schema,
+                    "options": {"temperature": 0},
+                    "messages": [{"role": "user", "content": json.dumps(prompt)}],
+                },
+            )
+            response.raise_for_status()
+        payload = json.loads(response.json()["message"]["content"])
+        answer = str(payload.get("answer", "")).strip()
+        if not answer:
+            raise ValueError("The analysis explanation is empty")
+        return answer
+
+    async def stream(
+        self, question: str, analysis: dict[str, object]
+    ) -> AsyncIterator[str]:
+        prompt = {
+            "instruction": (
+                "Answer the follow-up question in the user's language using only the recorded "
+                "customer profile, model votes, confidences, and final decision. Label 1 means "
+                "predicted churn and label 0 means predicted retention. Explain associations, "
+                "not causal claims, and acknowledge disagreement when present. A confidence value "
+                "supports only that model's own label, never the opposite label. Return plain text."
+            ),
+            "analysis": analysis,
+            "question": question,
+        }
+        async with httpx.AsyncClient(timeout=60) as client:
+            async with client.stream(
+                "POST",
+                f"{self.base_url}/api/chat",
+                json={
+                    "model": self.model,
+                    "stream": True,
+                    "think": False,
+                    "options": {"temperature": 0},
+                    "messages": [{"role": "user", "content": json.dumps(prompt)}],
+                },
+            ) as response:
+                response.raise_for_status()
+                async for line in response.aiter_lines():
+                    if not line:
+                        continue
+                    token = str(json.loads(line).get("message", {}).get("content", ""))
+                    if token:
+                        yield token
+
+
+class OllamaConversationInterpreter:
+    def __init__(self, base_url: str | None = None, model: str | None = None) -> None:
+        self.base_url = (base_url or os.getenv("OLLAMA_URL", "http://ollama:11434")).rstrip("/")
+        self.model = model or os.getenv("OLLAMA_MODEL", "qwen3:1.7b")
+
+    async def interpret(self, message: str, context: dict[str, object]) -> str:
+        if context.get("profile_awaiting_confirmation") is True:
+            intents = ["confirm_profile", "cancel_profile", "update_profile"]
+        elif context.get("profile_in_progress") is True:
+            intents = ["cancel_profile", "update_profile"]
+        elif context.get("completed_prediction_available") is True:
+            intents = ["ask_about_result", "describe_customer"]
+        else:
+            intents = ["describe_customer"]
+        output_schema = {
+            "type": "object",
+            "properties": {"intent": {"type": "string", "enum": intents}},
+            "required": ["intent"],
+            "additionalProperties": False,
+        }
+        definitions = {
+            "confirm_profile": "The user approves the displayed profile and wants prediction to run.",
+            "cancel_profile": "The user withdraws, gives up, stops, or does not want the prediction.",
+            "update_profile": "The user corrects or adds customer attributes before prediction.",
+            "ask_about_result": "The user asks about the meaning, evidence, models, or completed result.",
+            "describe_customer": "The user provides attributes for a different customer.",
+        }
+        prompt = {
+            "instruction": (
+                "Infer the user's conversational intent in any language. Confirm or cancel only "
+                "when a profile is awaiting confirmation. Expressions granting permission to "
+                "proceed mean confirm_profile. Treat profile corrections as updates. "
+                "When a completed prediction exists, distinguish questions about that result from "
+                "descriptions of another customer. Use describe_customer for customer details."
+            ),
+            "available_intents": {intent: definitions[intent] for intent in intents},
+            "examples": [
+                {"message": "Pode prosseguir com esses dados", "intent": "confirm_profile"},
+                {"message": "Forget it, I do not want to continue", "intent": "cancel_profile"},
+                {"message": "Deixa pra lá", "intent": "cancel_profile"},
+                {"message": "Change the distance to 20 km", "intent": "update_profile"},
+                {"message": "Why did the models disagree?", "intent": "ask_about_result"},
+                {"message": "Here is another customer", "intent": "describe_customer"},
+            ],
+            "conversation_context": context,
+            "user_message": message,
+            "response_schema": output_schema,
+        }
+        async with httpx.AsyncClient(timeout=60) as client:
+            response = await client.post(
+                f"{self.base_url}/api/chat",
+                json={
+                    "model": self.model,
+                    "stream": False,
+                    "think": False,
+                    "format": output_schema,
+                    "options": {"temperature": 0},
+                    "messages": [{"role": "user", "content": json.dumps(prompt)}],
+                },
+            )
+            response.raise_for_status()
+        intent = str(json.loads(response.json()["message"]["content"]).get("intent", ""))
+        if intent not in intents:
+            raise ValueError("The conversation intent is invalid")
+        return intent
 
 
 def arbitration_schema(labels: set[str]) -> dict[str, object]:
