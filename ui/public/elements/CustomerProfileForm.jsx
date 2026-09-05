@@ -56,17 +56,23 @@ export default function CustomerProfileForm() {
   };
 
   return (
-    <Card className="mt-4 w-full">
-      <CardHeader>
+    <Card className="mb-24 mt-4 w-full">
+      <CardHeader className="pb-6">
         <CardTitle>Customer profile</CardTitle>
         <CardDescription>
           Fill in the customer attributes used by the five churn models.
         </CardDescription>
       </CardHeader>
-      <CardContent className="grid grid-cols-1 gap-5 md:grid-cols-2">
-        {props.fields.map((field) => (
-          <div key={field.id} className="flex flex-col gap-2">
-            <Label htmlFor={field.id}>{field.label}</Label>
+      <CardContent>
+        <div
+          className="grid gap-x-6 gap-y-6"
+          style={{ gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))" }}
+        >
+          {props.fields.map((field) => (
+            <div key={field.id} className="grid content-start gap-2">
+              <Label className="block leading-5" htmlFor={field.id}>
+                {field.label}
+              </Label>
             {field.type === "select" ? (
               <Select
                 disabled={submitted}
@@ -97,13 +103,16 @@ export default function CustomerProfileForm() {
                 onChange={(event) => updateValue(field.id, event.target.value)}
               />
             )}
-            {errors[field.id] && values[field.id] !== undefined && (
-              <span className="text-xs text-destructive">{errors[field.id]}</span>
-            )}
-          </div>
-        ))}
+              {errors[field.id] && values[field.id] !== undefined && (
+                <span className="min-h-4 text-xs text-destructive">
+                  {errors[field.id]}
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
       </CardContent>
-      <CardFooter className="flex items-center justify-between gap-3">
+      <CardFooter className="mt-8 flex items-center justify-between gap-4 pb-8">
         <Button variant="outline" disabled={submitted} onClick={() => cancelElement()}>
           Cancel
         </Button>
