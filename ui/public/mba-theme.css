@@ -83,11 +83,19 @@ tr:hover td {
   background: rgba(27, 87, 218, 0.08);
 }
 
-textarea:focus,
 input:focus,
 button:focus-visible {
   border-color: var(--mba-blue) !important;
   box-shadow: 0 0 0 3px rgba(1, 116, 190, 0.22) !important;
+}
+
+textarea,
+textarea:focus,
+textarea:focus-visible {
+  border: 0 !important;
+  outline: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
 }
 
 button[class*="primary"],
