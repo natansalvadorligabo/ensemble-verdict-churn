@@ -12,6 +12,8 @@ python training/train.py
 docker compose up --build
 ```
 
+Python 3.14 is not supported by the pinned PyCaret/NumPy training stack. The Docker images already use Python 3.12; for local training, create a Python 3.12 virtual environment first.
+
 Open `http://localhost:8001`. Send a JSON customer profile using the field names and values from `http://localhost:8000/form-schema`.
 
 Pull Qwen once after Compose starts:
