@@ -7,6 +7,7 @@ from typing import Any, Protocol
 
 import httpx
 import joblib
+import pandas as pd
 
 from app.domain import ArbitrationResult, ModelVote
 
@@ -32,17 +33,18 @@ class ArtifactEnsemble:
         }
 
     async def predict(self, instance: dict[str, object]) -> AsyncIterator[ModelVote]:
+        features = pd.DataFrame([instance])
         for name, model in self.models.items():
             started_at = time.perf_counter()
-            label = str(model.predict([instance])[0])
-            confidence = self._confidence(model, instance, label)
+            label = str(model.predict(features)[0])
+            confidence = self._confidence(model, features, label)
             latency_ms = round((time.perf_counter() - started_at) * 1000, 2)
             yield ModelVote(name, label, confidence, latency_ms)
 
-    def _confidence(self, model: Any, instance: dict[str, object], label: str) -> float | None:
+    def _confidence(self, model: Any, features: pd.DataFrame, label: str) -> float | None:
         if not hasattr(model, "predict_proba"):
             return None
-        probabilities = model.predict_proba([instance])[0]
+        probabilities = model.predict_proba(features)[0]
         classes = [str(item) for item in model.classes_]
         return round(float(probabilities[classes.index(label)]), 4)
 

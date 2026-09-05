@@ -39,14 +39,14 @@ def create_app(ensemble: Ensemble | None = None, arbiter: Arbiter | None = None)
     async def prediction_stream(instance: dict[str, object]) -> StreamingResponse:
         if not instance:
             raise HTTPException(422, "A customer instance is required")
+        active_ensemble = app.state.ensemble
         artifact_directory = Path(os.getenv("ARTIFACT_DIRECTORY", "artifacts"))
         schema_path = artifact_directory / "form_schema.json"
-        if schema_path.exists():
+        if active_ensemble is None and schema_path.exists():
             try:
                 instance = validate_instance(instance, load_form_schema(schema_path))
             except ValueError as error:
                 raise HTTPException(422, str(error)) from error
-        active_ensemble = app.state.ensemble
         if active_ensemble is None:
             try:
                 active_ensemble = ArtifactEnsemble(artifact_directory)

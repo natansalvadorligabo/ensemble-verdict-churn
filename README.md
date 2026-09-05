@@ -4,17 +4,19 @@ This academic, non-commercial MVP makes a local churn ensemble observable. It ru
 
 ## Run the demonstration
 
-Train the artifacts first. Kaggle credentials must be configured locally and are never committed.
+The versioned dataset is included locally, so training does not require Kaggle credentials or network access.
 
 ```powershell
+py -3.13 -m venv .venv
+.\.venv\Scripts\Activate.ps1
 python -m pip install -e ".[training,test]"
 python training/train.py
 docker compose up --build
 ```
 
-Python 3.12+ is not supported by the pinned PyCaret 3.3.2 legacy API. The Docker images use Python 3.11; for local training, create a Python 3.11 virtual environment first.
+The training stack uses Python 3.13 and PyCaret 4.0.0a8, the newest PyCaret release compatible with the modern scientific Python stack. Python 3.14 is not supported yet by its joblib and cloudpickle persistence dependencies.
 
-Open `http://localhost:8001`. Send a JSON customer profile using the field names and values from `http://localhost:8000/form-schema`.
+Open `http://localhost:8001` and submit the generated customer form. Its fields and permitted values are derived from the persisted training schema.
 
 Pull Qwen once after Compose starts:
 
@@ -36,9 +38,9 @@ An unavailable or invalid arbitration emits an explicit SSE error and no final c
 
 ## Training and reproducibility
 
-`training/train.py` downloads the immutable Kaggle handle `ankitverma2010/ecommerce-customer-churn-analysis-and-prediction/versions/1`, source file `E Commerce Dataset.xlsx`, sheet `E Comm`. It removes `CustomerID`, normalizes categorical values, applies mean/mode imputation, freezes a stratified 80/20 split using seed 42, and uses PyCaret feature selection and SMOTE within training only. It persists KNN, SVM-RBF, Random Forest, XGBoost, and Naive Bayes pipelines plus prepared data, splits, schema, predictions, and model/ensemble metrics.
+`training/train.py` reads the versioned local file `data/ecommerce_customer_churn.csv`. It removes `CustomerID`, normalizes categorical values, applies train-only imputation and SMOTE, freezes a stratified 80/20 split using seed 42, and applies PyCaret feature selection. It persists KNN, SVM-RBF, Random Forest, XGBoost, and Naive Bayes pipelines plus prepared data, splits, schema, predictions, and model/ensemble metrics.
 
-The dataset is attributed to its Kaggle publisher and is licensed CC BY-NC-SA 4.0. This repository is for study and non-commercial demonstration only. Dataset quality, historical bias, and the small local arbiter limit the reliability of any real-world use.
+The local dataset is derived from Kaggle dataset `ankitverma2010/ecommerce-customer-churn-analysis-and-prediction`, version 1, file `E Commerce Dataset.xlsx`, sheet `E Comm`. It is licensed CC BY-NC-SA 4.0 and this repository is for study and non-commercial demonstration only. See `data/DATASET_LICENSE.md` for attribution. Dataset quality, historical bias, and the small local arbiter limit the reliability of any real-world use.
 
 ## Tests
 

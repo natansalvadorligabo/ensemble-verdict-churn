@@ -1,7 +1,7 @@
 import pytest
 
 from app.domain import ModelVote, aggregate_votes
-from app.services import normalize_arbitration_response, validate_instance
+from app.services import ArtifactEnsemble, normalize_arbitration_response, validate_instance
 
 
 def votes(labels: list[str]) -> list[ModelVote]:
@@ -56,3 +56,26 @@ def test_instance_validation_rejects_untrained_categories() -> None:
 
     with pytest.raises(ValueError, match="trained category"):
         validate_instance({"Device": "Tablet"}, schema)
+
+
+@pytest.mark.asyncio
+async def test_artifact_ensemble_passes_a_tabular_instance_to_the_pipeline() -> None:
+    class TabularModel:
+        classes_ = ["No", "Yes"]
+
+        def predict(self, frame: object) -> list[str]:
+            assert frame.__class__.__name__ == "DataFrame"
+            assert frame.iloc[0]["Tenure"] == 4
+            return ["No"]
+
+        def predict_proba(self, frame: object) -> list[list[float]]:
+            return [[0.9, 0.1]]
+
+    ensemble = ArtifactEnsemble.__new__(ArtifactEnsemble)
+    ensemble.models = {"KNN": TabularModel()}
+
+    votes = [vote async for vote in ensemble.predict({"Tenure": 4})]
+
+    assert votes[0].model == "KNN"
+    assert votes[0].label == "No"
+    assert votes[0].confidence == 0.9
