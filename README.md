@@ -2,6 +2,10 @@
 
 This academic, non-commercial MVP makes a local churn ensemble observable. It runs five persisted classifiers and calls Qwen only when their votes split 3–2.
 
+## Demo
+
+![Churn Intelligence conversational prediction demo](docs/media/churn-intelligence-demo.gif)
+
 ## Run the demonstration
 
 The versioned dataset is included locally, so training does not require Kaggle credentials or network access.
