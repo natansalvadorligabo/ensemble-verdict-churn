@@ -1,0 +1,43 @@
+[project]
+user_env = []
+session_timeout = 3600
+user_session_timeout = 1296000
+cache = false
+allow_origins = ["*"]
+
+[features]
+unsafe_allow_html = false
+latex = false
+user_message_markdown = true
+user_message_autoscroll = true
+assistant_message_autoscroll = true
+edit_message = true
+allow_thread_sharing = false
+favorites = false
+
+[features.spontaneous_file_upload]
+enabled = false
+
+[features.audio]
+enabled = false
+
+[features.mcp]
+enabled = false
+
+[UI]
+name = "Churn Intelligence"
+default_theme = "dark"
+language = "pt-BR"
+layout = "wide"
+default_sidebar_state = "hidden"
+confirm_new_chat = true
+description = "Projeto acadêmico de ensemble para previsão de churn — MBA em IA & Big Data, ICMC-USP"
+cot = "tool_call"
+custom_css = "/public/mba-theme.css"
+logo_file_url = "/public/churn-intelligence-logo.svg"
+default_avatar_file_url = "/public/churn-intelligence-avatar.svg"
+avatar_size = 28
+alert_style = "modern"
+
+[meta]
+generated_by = "2.12.0"

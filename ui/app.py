@@ -44,6 +44,9 @@ async def start() -> None:
         cl.user_session.set("schema", await request_schema())
         await cl.Message(
             content=(
+                "# Churn Intelligence\n\n"
+                "**MBA em Inteligência Artificial & Big Data · ICMC-USP**  \n"
+                "Projeto acadêmico de **Natan Salvador Ligabô**\n\n"
                 "Describe the customer naturally, in any language. I will extract the model "
                 "inputs, ask only for missing information, and show the profile for confirmation. "
                 "Type `/form` at any time to use the manual form instead."

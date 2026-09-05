@@ -56,7 +56,7 @@ export default function CustomerProfileForm() {
   };
 
   return (
-    <Card className="mb-24 mt-4 w-full">
+    <Card className="mba-profile-card mb-24 mt-4 w-full">
       <CardHeader className="pb-6">
         <CardTitle>Customer profile</CardTitle>
         <CardDescription>
