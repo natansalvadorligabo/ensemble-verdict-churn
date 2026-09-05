@@ -5,3 +5,4 @@ __pycache__/
 artifacts/*
 !artifacts/.gitkeep
 .chainlit/
+logs.log
