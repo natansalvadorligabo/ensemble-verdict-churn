@@ -51,3 +51,5 @@ python -m pytest
 ## Licenses
 
 The original source code is available under the [MIT License](LICENSE). The included dataset remains under CC BY-NC-SA 4.0 and is excluded from the MIT grant. See the [dataset attribution](data/DATASET_LICENSE.md) for details.
+
+The MBA IA & Big Data emblem is sourced from the program's official website and remains the property of its respective rights holders. It is used here only to identify the academic context of this project.

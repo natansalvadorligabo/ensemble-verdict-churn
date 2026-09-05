@@ -34,8 +34,8 @@ confirm_new_chat = true
 description = "Projeto acadêmico de ensemble para previsão de churn — MBA em IA & Big Data, ICMC-USP"
 cot = "tool_call"
 custom_css = "/public/mba-theme.css"
-logo_file_url = "/public/churn-intelligence-logo.svg"
-default_avatar_file_url = "/public/churn-intelligence-avatar.svg"
+logo_file_url = "/public/mba-ia-big-data-logo.png"
+default_avatar_file_url = "/public/mba-ia-big-data-logo.png"
 avatar_size = 28
 alert_style = "modern"
 
