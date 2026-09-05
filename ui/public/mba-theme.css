@@ -121,3 +121,46 @@ button[type="submit"] {
     text-align: right;
   }
 }
+
+html:not(.dark),
+html:not(.dark) body,
+html:not(.dark) #root {
+  color: var(--mba-surface);
+  background:
+    radial-gradient(circle at 12% -10%, rgba(27, 87, 218, 0.14), transparent 32rem),
+    linear-gradient(145deg, #ffffff 0%, #f5f8ff 58%, #e8efff 135%);
+}
+
+html:not(.dark) header {
+  border-bottom-color: rgba(13, 28, 89, 0.12) !important;
+  background: rgba(255, 255, 255, 0.82) !important;
+}
+
+html:not(.dark) body::after {
+  color: var(--mba-navy);
+}
+
+html:not(.dark) table {
+  border-color: rgba(13, 28, 89, 0.14) !important;
+  background: rgba(255, 255, 255, 0.86);
+}
+
+html:not(.dark) thead {
+  background: rgba(1, 116, 190, 0.1);
+}
+
+html:not(.dark) th {
+  color: var(--mba-navy) !important;
+}
+
+html:not(.dark) tr:hover td {
+  background: rgba(27, 87, 218, 0.06);
+}
+
+html:not(.dark) .mba-profile-card {
+  border-color: rgba(1, 116, 190, 0.2) !important;
+  background:
+    linear-gradient(135deg, rgba(27, 87, 218, 0.08), transparent 42%),
+    rgba(255, 255, 255, 0.94) !important;
+  box-shadow: 0 1.5rem 4rem rgba(13, 28, 89, 0.12);
+}
