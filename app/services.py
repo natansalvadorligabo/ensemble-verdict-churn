@@ -62,6 +62,7 @@ class OllamaArbiter:
             "instance": instance,
             "votes": [vote.__dict__ for vote in votes],
             "instruction": "Choose one allowed label and give a short evidence-based explanation.",
+            "response_schema": arbitration_schema(labels),
         }
         async with httpx.AsyncClient(timeout=60) as client:
             response = await client.post(
@@ -69,13 +70,27 @@ class OllamaArbiter:
                 json={
                     "model": self.model,
                     "stream": False,
-                    "format": "json",
+                    "think": False,
+                    "format": arbitration_schema(labels),
+                    "options": {"temperature": 0},
                     "messages": [{"role": "user", "content": json.dumps(prompt)}],
                 },
             )
             response.raise_for_status()
         content = response.json()["message"]["content"]
         return normalize_arbitration_response(content, labels)
+
+
+def arbitration_schema(labels: set[str]) -> dict[str, object]:
+    return {
+        "type": "object",
+        "properties": {
+            "label": {"type": "string", "enum": sorted(labels)},
+            "explanation": {"type": "string", "minLength": 1},
+        },
+        "required": ["label", "explanation"],
+        "additionalProperties": False,
+    }
 
 
 def normalize_arbitration_response(

@@ -1,7 +1,12 @@
 import pytest
 
 from app.domain import ModelVote, aggregate_votes
-from app.services import ArtifactEnsemble, normalize_arbitration_response, validate_instance
+from app.services import (
+    ArtifactEnsemble,
+    arbitration_schema,
+    normalize_arbitration_response,
+    validate_instance,
+)
 
 
 def votes(labels: list[str]) -> list[ModelVote]:
@@ -33,6 +38,14 @@ def test_arbitration_response_rejects_unknown_labels() -> None:
 def test_arbitration_response_requires_explanation() -> None:
     with pytest.raises(ValueError, match="explanation"):
         normalize_arbitration_response('{"label":"No","explanation":""}', {"No", "Yes"})
+
+
+def test_arbitration_schema_restricts_the_response_to_allowed_labels() -> None:
+    schema = arbitration_schema({"1", "0"})
+
+    assert schema["properties"]["label"]["enum"] == ["0", "1"]
+    assert schema["required"] == ["label", "explanation"]
+    assert schema["additionalProperties"] is False
 
 
 def test_instance_validation_accepts_only_the_trained_schema() -> None:
