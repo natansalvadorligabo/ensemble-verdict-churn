@@ -1,5 +1,6 @@
 import json
 from collections.abc import AsyncIterator
+from pathlib import Path
 
 import httpx
 import pytest
@@ -34,6 +35,19 @@ class StubArbiter:
         if isinstance(self.result, Exception):
             raise self.result
         return self.result
+
+
+class StubExtractor:
+    async def extract(
+        self,
+        message: str,
+        current_profile: dict[str, object],
+        form_schema: dict[str, object],
+    ) -> dict[str, object]:
+        return {
+            "profile": {**current_profile, "Tenure": 4.0},
+            "missing_fields": ["PreferredLoginDevice"],
+        }
 
 
 async def stream_events(client: httpx.AsyncClient) -> list[dict[str, object]]:
@@ -123,3 +137,37 @@ async def test_arbitration_failure_is_explicit_and_has_no_final_label() -> None:
 
     assert events[-1]["type"] == "arbitration_error"
     assert events[-1]["content"] == {"message": "Ollama is unavailable"}
+
+
+@pytest.mark.asyncio
+async def test_profile_extraction_accepts_natural_language_and_current_values(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    artifact_directory = tmp_path
+    schema_path = artifact_directory / "form_schema.json"
+    schema_path.write_text(
+        json.dumps(
+            {
+                "fields": [
+                    {"name": "Tenure", "type": "number", "minimum": 0, "maximum": 10},
+                    {"name": "PreferredLoginDevice", "type": "select", "options": ["Mobile"]},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("ARTIFACT_DIRECTORY", str(artifact_directory))
+    app = create_app(StubEnsemble(["No"] * 5), StubArbiter(RuntimeError()), StubExtractor())
+    transport = httpx.ASGITransport(app=app)
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/profiles/extract",
+            json={"message": "The customer has four months of tenure", "current_profile": {}},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "profile": {"Tenure": 4.0},
+        "missing_fields": ["PreferredLoginDevice"],
+    }

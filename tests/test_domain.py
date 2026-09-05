@@ -5,6 +5,8 @@ from app.services import (
     ArtifactEnsemble,
     arbitration_schema,
     normalize_arbitration_response,
+    normalize_profile_extraction,
+    profile_extraction_schema,
     validate_instance,
 )
 
@@ -46,6 +48,37 @@ def test_arbitration_schema_restricts_the_response_to_allowed_labels() -> None:
     assert schema["properties"]["label"]["enum"] == ["0", "1"]
     assert schema["required"] == ["label", "explanation"]
     assert schema["additionalProperties"] is False
+
+
+def test_profile_extraction_schema_allows_explicitly_missing_fields() -> None:
+    form_schema = {
+        "fields": [
+            {"name": "Tenure", "type": "number", "minimum": 0, "maximum": 10},
+            {"name": "Device", "type": "select", "options": ["Mobile", "Computer"]},
+        ]
+    }
+
+    schema = profile_extraction_schema(form_schema)
+
+    profile = schema["properties"]["profile"]
+    assert profile["required"] == ["Tenure", "Device"]
+    assert profile["properties"]["Tenure"]["anyOf"][1] == {"type": "null"}
+    assert profile["properties"]["Device"]["anyOf"][0]["enum"] == ["Mobile", "Computer"]
+
+
+def test_profile_extraction_computes_missing_fields_from_validated_values() -> None:
+    form_schema = {
+        "fields": [
+            {"name": "Tenure", "type": "number", "minimum": 0, "maximum": 10},
+            {"name": "Device", "type": "select", "options": ["Mobile", "Computer"]},
+        ]
+    }
+
+    extraction = normalize_profile_extraction(
+        {"profile": {"Tenure": 4, "Device": None}}, form_schema
+    )
+
+    assert extraction == {"profile": {"Tenure": 4.0}, "missing_fields": ["Device"]}
 
 
 def test_instance_validation_accepts_only_the_trained_schema() -> None:

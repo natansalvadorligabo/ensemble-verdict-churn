@@ -16,7 +16,7 @@ docker compose up --build
 
 The training stack uses Python 3.13 and PyCaret 4.0.0a8, the newest PyCaret release compatible with the modern scientific Python stack. Python 3.14 is not supported yet by its joblib and cloudpickle persistence dependencies.
 
-Open `http://localhost:8001` and complete the customer form embedded in the conversation. Its fields, ranges, and permitted values are derived from the persisted training schema. A new form is offered after every prediction.
+Open `http://localhost:8001` and describe a customer naturally in any language. Qwen extracts the typed prediction arguments, the assistant requests only missing attributes, and a confirmation is required before the five classifiers run. Type `/form` to use the schema-driven manual form instead.
 
 Pull Qwen once after Compose starts:
 

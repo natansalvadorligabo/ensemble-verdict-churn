@@ -24,6 +24,15 @@ class Arbiter(Protocol):
     ) -> ArbitrationResult: ...
 
 
+class ProfileExtractor(Protocol):
+    async def extract(
+        self,
+        message: str,
+        current_profile: dict[str, object],
+        form_schema: dict[str, object],
+    ) -> dict[str, object]: ...
+
+
 class ArtifactEnsemble:
     def __init__(self, artifact_directory: Path) -> None:
         self.artifact_directory = artifact_directory
@@ -81,6 +90,54 @@ class OllamaArbiter:
         return normalize_arbitration_response(content, labels)
 
 
+class OllamaProfileExtractor:
+    def __init__(self, base_url: str | None = None, model: str | None = None) -> None:
+        self.base_url = (base_url or os.getenv("OLLAMA_URL", "http://ollama:11434")).rstrip("/")
+        self.model = model or os.getenv("OLLAMA_MODEL", "qwen3:1.7b")
+
+    async def extract(
+        self,
+        message: str,
+        current_profile: dict[str, object],
+        form_schema: dict[str, object],
+    ) -> dict[str, object]:
+        output_schema = profile_extraction_schema(form_schema)
+        prompt = {
+            "instruction": (
+                "Extract customer attributes from the user's message in any language. "
+                "Use only the supplied field names and categorical values. "
+                "Return null for every value that was not explicitly provided or corrected."
+            ),
+            "current_profile": current_profile,
+            "user_message": message,
+            "field_schema": form_schema,
+            "response_schema": output_schema,
+        }
+        async with httpx.AsyncClient(timeout=60) as client:
+            response = await client.post(
+                f"{self.base_url}/api/chat",
+                json={
+                    "model": self.model,
+                    "stream": False,
+                    "think": False,
+                    "format": output_schema,
+                    "options": {"temperature": 0},
+                    "messages": [{"role": "user", "content": json.dumps(prompt)}],
+                },
+            )
+            response.raise_for_status()
+        content = json.loads(response.json()["message"]["content"])
+        extraction = normalize_profile_extraction(content, form_schema)
+        merged = {**current_profile, **extraction["profile"]}
+        complete_payload = {
+            "profile": {
+                str(field["name"]): merged.get(str(field["name"]))
+                for field in form_schema["fields"]
+            }
+        }
+        return normalize_profile_extraction(complete_payload, form_schema)
+
+
 def arbitration_schema(labels: set[str]) -> dict[str, object]:
     return {
         "type": "object",
@@ -91,6 +148,63 @@ def arbitration_schema(labels: set[str]) -> dict[str, object]:
         "required": ["label", "explanation"],
         "additionalProperties": False,
     }
+
+
+def profile_extraction_schema(form_schema: dict[str, object]) -> dict[str, object]:
+    fields = form_schema.get("fields")
+    if not isinstance(fields, list):
+        raise ValueError("The artifact form schema is invalid")
+    properties: dict[str, object] = {}
+    required: list[str] = []
+    for field in fields:
+        if not isinstance(field, dict):
+            raise ValueError("The artifact form schema is invalid")
+        name = str(field["name"])
+        required.append(name)
+        if field["type"] == "number":
+            value_schema = {
+                "type": "number",
+                "minimum": field["minimum"],
+                "maximum": field["maximum"],
+            }
+        else:
+            value_schema = {"type": "string", "enum": field["options"]}
+        properties[name] = {"anyOf": [value_schema, {"type": "null"}]}
+    return {
+        "type": "object",
+        "properties": {
+            "profile": {
+                "type": "object",
+                "properties": properties,
+                "required": required,
+                "additionalProperties": False,
+            }
+        },
+        "required": ["profile"],
+        "additionalProperties": False,
+    }
+
+
+def normalize_profile_extraction(
+    content: str | dict[str, object], form_schema: dict[str, object]
+) -> dict[str, object]:
+    payload = json.loads(content) if isinstance(content, str) else content
+    profile = payload.get("profile")
+    fields = form_schema.get("fields")
+    if not isinstance(profile, dict) or not isinstance(fields, list):
+        raise ValueError("The extracted customer profile is invalid")
+    validated: dict[str, object] = {}
+    missing: list[str] = []
+    for field in fields:
+        if not isinstance(field, dict):
+            raise ValueError("The artifact form schema is invalid")
+        name = str(field["name"])
+        value = profile.get(name)
+        if value is None:
+            missing.append(name)
+            continue
+        validated[name] = validate_field_value(name, value, field)
+    return {"profile": validated, "missing_fields": missing}
 
 
 def normalize_arbitration_response(
@@ -126,17 +240,19 @@ def validate_instance(instance: dict[str, object], schema: dict[str, object]) ->
         if not isinstance(field, dict):
             raise ValueError("The artifact form schema is invalid")
         name = str(field["name"])
-        value = instance[name]
-        if field["type"] == "number":
-            try:
-                numeric_value = float(str(value))
-            except ValueError as error:
-                raise ValueError(f"{name} must be numeric") from error
-            if numeric_value < float(field["minimum"]) or numeric_value > float(field["maximum"]):
-                raise ValueError(f"{name} is outside the trained range")
-            validated[name] = numeric_value
-        elif str(value) in field.get("options", []):
-            validated[name] = str(value)
-        else:
-            raise ValueError(f"{name} is not a trained category")
+        validated[name] = validate_field_value(name, instance[name], field)
     return validated
+
+
+def validate_field_value(name: str, value: object, field: dict[str, object]) -> object:
+    if field["type"] == "number":
+        try:
+            numeric_value = float(str(value))
+        except ValueError as error:
+            raise ValueError(f"{name} must be numeric") from error
+        if numeric_value < float(field["minimum"]) or numeric_value > float(field["maximum"]):
+            raise ValueError(f"{name} is outside the trained range")
+        return numeric_value
+    if str(value) in field.get("options", []):
+        return str(value)
+    raise ValueError(f"{name} is not a trained category")

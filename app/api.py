@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 
@@ -14,15 +15,22 @@ from app.services import (
     ArtifactEnsemble,
     Ensemble,
     OllamaArbiter,
+    OllamaProfileExtractor,
+    ProfileExtractor,
     load_form_schema,
     validate_instance,
 )
 
 
-def create_app(ensemble: Ensemble | None = None, arbiter: Arbiter | None = None) -> FastAPI:
+def create_app(
+    ensemble: Ensemble | None = None,
+    arbiter: Arbiter | None = None,
+    extractor: ProfileExtractor | None = None,
+) -> FastAPI:
     app = FastAPI(title="Ensemble Verdict Churn API")
     app.state.ensemble = ensemble
     app.state.arbiter = arbiter or OllamaArbiter()
+    app.state.extractor = extractor or OllamaProfileExtractor()
 
     @app.get("/health")
     async def health() -> dict[str, str]:
@@ -34,6 +42,26 @@ def create_app(ensemble: Ensemble | None = None, arbiter: Arbiter | None = None)
         if not metadata_path.exists():
             raise HTTPException(503, "Training artifacts are not available")
         return json.loads(metadata_path.read_text(encoding="utf-8"))
+
+    @app.post("/profiles/extract")
+    async def extract_profile(payload: dict[str, object]) -> dict[str, object]:
+        message = str(payload.get("message", "")).strip()
+        current_profile = payload.get("current_profile", {})
+        if not message:
+            raise HTTPException(422, "A customer description is required")
+        if not isinstance(current_profile, dict):
+            raise HTTPException(422, "The current customer profile is invalid")
+        schema_path = Path(os.getenv("ARTIFACT_DIRECTORY", "artifacts")) / "form_schema.json"
+        if not schema_path.exists():
+            raise HTTPException(503, "Training artifacts are not available")
+        try:
+            return await app.state.extractor.extract(
+                message, current_profile, load_form_schema(schema_path)
+            )
+        except ValueError as error:
+            raise HTTPException(422, str(error)) from error
+        except httpx.HTTPError as error:
+            raise HTTPException(503, f"Profile extraction is unavailable: {error}") from error
 
     @app.post("/predictions/stream")
     async def prediction_stream(instance: dict[str, object]) -> StreamingResponse:
