@@ -65,11 +65,19 @@ export default function CustomerProfileForm() {
       </CardHeader>
       <CardContent>
         <div
-          className="grid gap-x-6 gap-y-6"
-          style={{ gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))" }}
+          className="grid"
+          style={{
+            gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+            columnGap: "2rem",
+            rowGap: "1.5rem",
+          }}
         >
           {props.fields.map((field) => (
-            <div key={field.id} className="grid content-start gap-2">
+            <div
+              key={field.id}
+              className="grid content-start"
+              style={{ rowGap: "0.625rem" }}
+            >
               <Label className="block leading-5" htmlFor={field.id}>
                 {field.label}
               </Label>
